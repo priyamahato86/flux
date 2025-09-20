@@ -8,7 +8,130 @@ datasource db {
 }
 
 model User {
-  id    String @id @default(cuid())
-  email String @unique
-  name  String
+  id             String           @id @default(cuid())
+  email          String           @unique
+  username       String           @unique
+  name           String?
+  avatar         String?
+  bio            String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  datasets       Dataset[]
+  notebooks      Notebook[]
+  issues         Issue[]
+  pullRequests   PullRequest[]
+  comments       Comment[]
+  DatasetVersion DatasetVersion[]
+}
+
+model Dataset {
+  id           String           @id @default(cuid())
+  name         String
+  slug         String           @unique
+  description  String?
+  authorNote   String?
+  license      String
+  isPrivate    Boolean          @default(false)
+  dataCard     Json?
+  tags         String[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  ownerId      String
+  owner        User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  versions     DatasetVersion[]
+  issues       Issue[]
+  pullRequests PullRequest[]
+  notebooks    Notebook[]
+}
+
+model DatasetVersion {
+  id            String        @id @default(cuid())
+  version       String
+  fileUrl       String
+  fileName      String
+  fileSize      BigInt
+  commitMessage String
+  commitUser    String
+  isLatest      Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  datasetId     String
+  dataset       Dataset       @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [commitUser], references: [id])
+  pullRequests  PullRequest[]
+
+  @@unique([datasetId, version])
+}
+
+model Issue {
+  id          String      @id @default(cuid())
+  title       String
+  description String
+  status      IssueStatus @default(OPEN)
+  labels      String[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  closedAt    DateTime?
+  authorId    String
+  author      User        @relation(fields: [authorId], references: [id])
+  datasetId   String
+  dataset     Dataset     @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  comments    Comment[]
+}
+
+model PullRequest {
+  id               String          @id @default(cuid())
+  title            String
+  description      String
+  status           PRStatus        @default(OPEN)
+  modifiedFileUrl  String
+  modifiedFileName String
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  mergedAt         DateTime?
+  closedAt         DateTime?
+  authorId         String
+  author           User            @relation(fields: [authorId], references: [id])
+  datasetId        String
+  dataset          Dataset         @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  mergedVersionId  String?
+  mergedVersion    DatasetVersion? @relation(fields: [mergedVersionId], references: [id])
+  comments         Comment[]
+}
+
+model Comment {
+  id            String       @id @default(cuid())
+  content       String
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  authorId      String
+  author        User         @relation(fields: [authorId], references: [id])
+  issueId       String?
+  issue         Issue?       @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  pullRequestId String?
+  pullRequest   PullRequest? @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+}
+
+model Notebook {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  fileUrl     String?
+  isPublic    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  datasetId   String?
+  dataset     Dataset? @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+}
+
+enum IssueStatus {
+  OPEN
+  CLOSED
+}
+
+enum PRStatus {
+  OPEN
+  MERGED
+  CLOSED
 }
