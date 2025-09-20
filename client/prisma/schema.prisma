@@ -8,7 +8,7 @@ datasource db {
 }
 
 model User {
-  id             String           @id @default(cuid())
+  id             String           @id @default(uuid())
   email          String           @unique
   username       String           @unique
   name           String?
@@ -25,7 +25,7 @@ model User {
 }
 
 model Dataset {
-  id           String           @id @default(cuid())
+  id           String           @id @default(uuid())
   name         String
   slug         String           @unique
   description  String?
@@ -45,7 +45,7 @@ model Dataset {
 }
 
 model DatasetVersion {
-  id            String        @id @default(cuid())
+  id            String        @id @default(uuid())
   version       String
   fileUrl       String
   fileName      String
@@ -63,7 +63,7 @@ model DatasetVersion {
 }
 
 model Issue {
-  id          String      @id @default(cuid())
+  id          String      @id @default(uuid())
   title       String
   description String
   status      IssueStatus @default(OPEN)
@@ -79,7 +79,7 @@ model Issue {
 }
 
 model PullRequest {
-  id               String          @id @default(cuid())
+  id               String          @id @default(uuid())
   title            String
   description      String
   status           PRStatus        @default(OPEN)
@@ -99,7 +99,7 @@ model PullRequest {
 }
 
 model Comment {
-  id            String       @id @default(cuid())
+  id            String       @id @default(uuid())
   content       String
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -112,7 +112,7 @@ model Comment {
 }
 
 model Notebook {
-  id          String   @id @default(cuid())
+  id          String   @id @default(uuid())
   title       String
   description String?
   fileUrl     String?
