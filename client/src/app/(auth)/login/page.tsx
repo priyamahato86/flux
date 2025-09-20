@@ -20,25 +20,43 @@ import Link from "next/link";
 export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!username || !password) {
       toast.error("Please enter both username and password.");
       return;
     }
 
-    const user = {
-      username,
-      email: `${username}@example.com`,
-    };
+    try {
+      setIsLoading(true);
 
-    setCookie("user-details", JSON.stringify(user), {
-      maxAge: 60 * 60 * 24 * 7,
-    });
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
 
-    toast.success("Logged in successfully!");
-    router.push(`/u/${username}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Authentication failed");
+      }
+
+      // Store user data in cookie (30 days expiry)
+      setCookie("ouser", JSON.stringify(data.user), {
+        maxAge: 60 * 60 * 24 * 30, // 30 days
+        path: "/",
+      });
+
+      toast.success("Logged in successfully!");
+      router.push(`/u/${data.user.username}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Login failed");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -54,7 +72,7 @@ export default function LoginPage() {
         </CardHeader>
         <CardContent className="grid gap-6">
           <div className="grid gap-2">
-            <Label htmlFor="username">Name</Label>
+            <Label htmlFor="username">Username</Label>
             <Input
               id="username"
               type="text"
@@ -80,11 +98,12 @@ export default function LoginPage() {
         </CardContent>
         <CardFooter className="flex flex-col gap-6">
           <Button
-  onClick={handleLogin}
-  className="w-full py-2 text-lg font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-colors"
->
-  Sign in
-</Button>
+            onClick={handleLogin}
+            disabled={isLoading}
+            className="w-full py-2 text-lg font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+          >
+            {isLoading ? "Signing in..." : "Sign in"}
+          </Button>
 
           <div className="text-center text-sm text-gray-600 dark:text-gray-400">
             Don&apos;t have an account?{" "}

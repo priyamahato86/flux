@@ -19,25 +19,62 @@ import { Label } from "@/components/ui/label";
 import Link from "next/link";
 
 export default function SignupPage() {
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [formData, setFormData] = useState({
+    username: "",
+    email: "",
+    password: "",
+    name: "",
+  });
+  const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
-  const handleSignUp = () => {
-    if (!username || !email || !password) {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { id, value } = e.target;
+    setFormData((prev) => ({ ...prev, [id]: value }));
+  };
+
+  const handleSignUp = async () => {
+    // Validate form fields
+    if (
+      !formData.username ||
+      !formData.email ||
+      !formData.password ||
+      !formData.name
+    ) {
       toast.error("Please fill in all fields.");
       return;
     }
 
-    const user = { username, email };
+    try {
+      setIsLoading(true);
 
-    setCookie("user-details", JSON.stringify(user), {
-      maxAge: 60 * 60 * 24 * 7,
-    });
+      const response = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
 
-    toast.success("Account created successfully!");
-    router.push(`/u/${username}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to create account");
+      }
+
+      // Store user data in cookie (30 days expiry)
+      setCookie("ouser", JSON.stringify(data.user), {
+        maxAge: 60 * 60 * 24 * 30, // 30 days
+        path: "/",
+      });
+
+      toast.success("Account created successfully!");
+      router.push(`/u/${data.user.username}`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Something went wrong"
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -53,14 +90,26 @@ export default function SignupPage() {
         </CardHeader>
         <CardContent className="grid gap-6">
           <div className="grid gap-2">
+            <Label htmlFor="name">Full Name</Label>
+            <Input
+              id="name"
+              type="text"
+              placeholder="John Wick"
+              required
+              value={formData.name}
+              onChange={handleChange}
+              className="rounded-xl"
+            />
+          </div>
+          <div className="grid gap-2">
             <Label htmlFor="username">Username</Label>
             <Input
               id="username"
               type="text"
               placeholder="johnwick"
               required
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              value={formData.username}
+              onChange={handleChange}
               className="rounded-xl"
             />
           </div>
@@ -71,8 +120,8 @@ export default function SignupPage() {
               type="email"
               placeholder="m@example.com"
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={formData.email}
+              onChange={handleChange}
               className="rounded-xl"
             />
           </div>
@@ -82,8 +131,8 @@ export default function SignupPage() {
               id="password"
               type="password"
               required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              value={formData.password}
+              onChange={handleChange}
               className="rounded-xl"
             />
           </div>
@@ -91,9 +140,10 @@ export default function SignupPage() {
         <CardFooter className="flex flex-col gap-6">
           <Button
             onClick={handleSignUp}
+            disabled={isLoading}
             className="w-full py-2 text-lg font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-colors"
           >
-            Create Account
+            {isLoading ? "Creating Account..." : "Create Account"}
           </Button>
           <div className="text-center text-sm text-gray-600 dark:text-gray-400">
             Already have an account?{" "}

@@ -14,10 +14,11 @@ import { redirect } from "next/navigation";
 export default async function UserProfilePage({
   params,
 }: {
-  params: { username: string };
+  params: Promise<{ username: string }>;
 }) {
+  const { username } = await params;
   // Await the promise to get the actual cookie value
-  const userCookie = await getCookie("user-details", { cookies });
+  const userCookie = await getCookie("ouser", { cookies });
 
   if (!userCookie) {
     redirect("/login");
@@ -26,7 +27,7 @@ export default async function UserProfilePage({
   // Now userCookie is a string, so JSON.parse will work
   const userData = JSON.parse(userCookie);
 
-  if (userData.username !== params.username) {
+  if (userData.username !== username) {
     return (
       <div className="text-center">
         <h1 className="text-2xl font-bold text-red-600">Access Denied</h1>
@@ -38,7 +39,9 @@ export default async function UserProfilePage({
   return (
     <Card className="w-full max-w-md">
       <CardHeader>
-        <CardTitle className="text-3xl">Welcome, {userData.username}!</CardTitle>
+        <CardTitle className="text-3xl">
+          Welcome, {userData.username}!
+        </CardTitle>
         <CardDescription>This is your profile page.</CardDescription>
       </CardHeader>
       <CardContent>
