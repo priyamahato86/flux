@@ -3,13 +3,16 @@ import os
 import io
 import json
 import uuid
+import time
+import re
 import hashlib
+import logging
 import datetime as dt
 from enum import Enum
 from typing import Optional, Dict, Any, List
 
 from dotenv import load_dotenv
-from flask import Flask, Blueprint, request, jsonify, current_app
+from flask import Flask, Blueprint, request, jsonify, current_app, g
 from werkzeug.utils import secure_filename
 
 import boto3
@@ -33,6 +36,9 @@ from sqlalchemy import Enum as SAEnum
 
 
 load_dotenv()
+
+
+logger = logging.getLogger("flux.server")
 
 def get_env(name: str, default: Optional[str] = None, required: bool = False) -> str:
     v = os.getenv(name, default)
@@ -210,9 +216,204 @@ class Notebook(Base):
     dataset = relationship("Dataset", back_populates="notebooks")
 
 
+def _configure_logging(app: Flask) -> None:
+    log_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_level = getattr(logging, log_level_name, logging.INFO)
+
+    formatter = logging.Formatter(
+        "%(asctime)s %(levelname)s [%(name)s] %(message)s"
+    )
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(log_level)
+    stream_handler.setFormatter(formatter)
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.addHandler(stream_handler)
+    root_logger.setLevel(log_level)
+
+    app.logger.handlers.clear()
+    app.logger.setLevel(log_level)
+    app.logger.propagate = True
+
+    logger.handlers.clear()
+    logger.setLevel(log_level)
+    logger.propagate = True
+
+
+_OPENAI_CLIENT: Any = None
+_OPENAI_DISABLED = object()
+
+
+def _get_openai_client():
+    global _OPENAI_CLIENT
+    if _OPENAI_CLIENT is _OPENAI_DISABLED:
+        return None
+
+    if _OPENAI_CLIENT is not None:
+        return _OPENAI_CLIENT
+
+    if not OPENAI_API_KEY:
+        logger.warning("OPENAI_API_KEY not configured; OpenAI features disabled")
+        _OPENAI_CLIENT = _OPENAI_DISABLED
+        return None
+
+    try:
+        if hasattr(openai, "OpenAI"):
+            _OPENAI_CLIENT = openai.OpenAI(api_key=OPENAI_API_KEY)
+            logger.debug("Initialized OpenAI client using beta SDK")
+        else:
+            openai.api_key = OPENAI_API_KEY
+            _OPENAI_CLIENT = openai
+            logger.debug("Initialized OpenAI client using legacy SDK")
+        return _OPENAI_CLIENT
+    except Exception:
+        logger.exception("Failed to initialize OpenAI client")
+        _OPENAI_CLIENT = _OPENAI_DISABLED
+        return None
+
+
+def _chat_completion(messages: List[Dict[str, str]], **kwargs) -> Optional[str]:
+    client = _get_openai_client()
+    if client is None:
+        return None
+
+    try:
+        if hasattr(client, "chat") and hasattr(client.chat, "completions"):
+            response = client.chat.completions.create(messages=messages, **kwargs)
+        else:
+            response = client.ChatCompletion.create(messages=messages, **kwargs)
+    except Exception:
+        logger.exception("OpenAI chat completion failed")
+        return None
+
+    try:
+        choices = getattr(response, "choices", None)
+        if choices is None:
+            choices = response["choices"]
+
+        first_choice = choices[0]
+
+        message = getattr(first_choice, "message", None)
+        if message is None:
+            message = first_choice["message"]
+
+        content = getattr(message, "content", None)
+        if content is None:
+            content = message["content"]
+
+        return content.strip()
+    except Exception:
+        logger.exception("Unexpected OpenAI response format")
+        return None
+
+
+def _build_basic_model_card(dataset_name: str, description: str, profile: Dict[str, Any]) -> Dict[str, Any]:
+    schema = profile.get("dtypes", {})
+    features = list(schema.keys())
+    row_count = profile.get("rows", 0)
+    col_count = profile.get("cols", len(features))
+    completeness_score = _calculate_completeness_score(profile.get("null_counts", {}), row_count or 1)
+
+    return {
+        "overview": {
+            "purpose": description or "General-purpose dataset",
+            "domain": (features[0] if features else "general"),
+            "keyCharacteristics": [
+                f"{row_count:,} rows" if row_count else "unknown rows",
+                f"{col_count} columns",
+                "auto-generated summary"
+            ]
+        },
+        "dataDescription": {
+            "structure": f"Tabular dataset with {col_count} columns",
+            "features": features[:10],
+            "targetVariable": None
+        },
+        "dataCollection": {
+            "methodology": "Not specified",
+            "sources": "Unknown",
+            "timeframe": "Unknown"
+        },
+        "dataQuality": {
+            "completeness": f"Approximately {completeness_score}% complete",
+            "consistency": "Not evaluated",
+            "potentialIssues": ["Auto-generated card – review manually"]
+        },
+        "intendedUseCases": [
+            "Exploratory analysis",
+            "Model prototyping",
+            "Data quality assessment"
+        ],
+        "limitations": [
+            "No AI-generated insights available",
+            "Requires manual validation"
+        ],
+        "technicalDetails": {
+            "format": "Tabular",
+            "recommendedPreprocessing": ["Review schema", "Handle missing values"]
+        }
+    }
+
+
+def _generate_basic_tags(dataset_name: str, description: Optional[str], schema: Dict[str, str]) -> List[str]:
+    candidates = []
+
+    for text in filter(None, [dataset_name, description]):
+        candidates.extend(re.findall(r"[A-Za-z0-9]+", text))
+
+    candidates.extend(schema.keys())
+
+    tags: List[str] = []
+    for token in candidates:
+        normalized = token.lower()
+        if len(normalized) < 3:
+            continue
+        if normalized not in tags:
+            tags.append(normalized)
+        if len(tags) >= 5:
+            break
+
+    if not tags:
+        tags.append("dataset")
+
+    return tags
+
+
+def _generate_basic_insights(profile: Dict[str, Any]) -> List[str]:
+    if not profile:
+        return ["Dataset profile unavailable; upload a CSV file to generate insights."]
+
+    rows = profile.get("rows")
+    cols = profile.get("cols")
+    schema = profile.get("dtypes", {})
+    null_counts = profile.get("null_counts", {})
+
+    insights = []
+    if rows is not None and cols is not None:
+        insights.append(f"Dataset contains approximately {rows:,} rows and {cols} columns.")
+    if schema:
+        insights.append(f"Key columns include: {', '.join(list(schema.keys())[:5])}.")
+    if null_counts:
+        high_null = [col for col, count in null_counts.items() if rows and rows > 0 and (count / rows) > 0.2]
+        if high_null:
+            insights.append(f"Columns with notable missing data: {', '.join(high_null[:5])}.")
+    completeness = _calculate_completeness_score(null_counts, rows or 0) if rows is not None else None
+    if completeness is not None:
+        insights.append(f"Estimated completeness score: {completeness}%.")
+
+    if not insights:
+        insights.append("No additional insights available from the uploaded profile data.")
+
+    return insights
+
 
 def create_app() -> Flask:
     app = Flask(__name__)
+
+    _configure_logging(app)
+    app.logger.info("Starting Flux server initialization")
 
     engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
     Base.metadata.create_all(engine)
@@ -240,10 +441,47 @@ def create_app() -> Flask:
     app.register_blueprint(notebooks_bp(Session), url_prefix="/notebooks")
     app.register_blueprint(reco_bp(Session, app.embed_coll), url_prefix="/recommendations")
 
+    @app.before_request
+    def _log_request_started():
+        g.request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+        g.request_started_at = time.perf_counter()
+        app.logger.info(
+            "Request started id=%s %s %s from=%s",
+            g.request_id,
+            request.method,
+            request.path,
+            request.remote_addr,
+        )
+
+    @app.after_request
+    def _log_request_completed(response):
+        duration_ms = 0.0
+        if hasattr(g, "request_started_at"):
+            duration_ms = (time.perf_counter() - g.request_started_at) * 1000
+        request_id = getattr(g, "request_id", "-")
+        app.logger.info(
+            "Request completed id=%s %s %s status=%s duration_ms=%.2f",
+            request_id,
+            request.method,
+            request.path,
+            response.status_code,
+            duration_ms,
+        )
+        if request_id:
+            response.headers["X-Request-ID"] = request_id
+        return response
+
+    @app.teardown_request
+    def _log_request_teardown(exc):
+        if exc is not None:
+            request_id = getattr(g, "request_id", "-")
+            app.logger.exception("Request failed id=%s", request_id)
+
     @app.route("/health")
     def health():
         return {"ok": True, "time": dt.datetime.utcnow().isoformat()}
 
+    app.logger.info("Flux server initialized successfully")
     return app
 
 
@@ -255,7 +493,7 @@ def _validate_s3(s3, bucket: str):
     try:
         s3.head_bucket(Bucket=bucket)
     except ClientError as e:
-        print(f"[warn] S3 bucket head failed: {e}")
+        logger.warning("S3 bucket validation failed: %s", e)
 
 def _sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
@@ -350,16 +588,11 @@ def _calculate_completeness_score(null_counts: Dict[str, int], total_rows: int) 
     return round(completeness, 2)
 
 def _generate_dataset_tags(dataset_name: str, description: str, sample_rows: List[Dict[str, Any]], schema: Dict[str, str]) -> List[str]:
-    """Generate 3-5 relevant tags for a dataset using OpenAI"""
-    if not OPENAI_API_KEY:
-        return []
-    
-    try:
-        # Prepare context for AI
-        schema_summary = ", ".join([f"{col}({dtype})" for col, dtype in list(schema.items())[:10]])
-        sample_preview = str(sample_rows[:3]) if sample_rows else "No sample data available"
-        
-        system_prompt = """You are a data science expert tasked with generating relevant tags for datasets. 
+    """Generate 3-5 relevant tags for a dataset using OpenAI with graceful fallback"""
+    schema_summary = ", ".join([f"{col}({dtype})" for col, dtype in list(schema.items())[:10]])
+    sample_preview = str(sample_rows[:3]) if sample_rows else "No sample data available"
+
+    system_prompt = """You are a data science expert tasked with generating relevant tags for datasets. 
 Generate 3-5 concise, descriptive tags that capture the domain, data type, and potential use cases.
 Tags should be:
 - Single words or short phrases (2-3 words max)
@@ -371,42 +604,44 @@ Tags should be:
 Examples of good tags: "finance", "time-series", "classification", "nlp", "computer-vision", "healthcare", "customer-analytics", "geospatial", "text-mining", "predictive-modeling"
 """
 
-        user_prompt = f"""Dataset: {dataset_name}
+    user_prompt = f"""Dataset: {dataset_name}
 Description: {description or "No description provided"}
 Schema: {schema_summary}
 Sample data: {sample_preview}
 
 Generate 3-5 relevant tags for this dataset. Return only the tags separated by commas, no other text."""
 
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            max_tokens=100,
-            temperature=0.3
-        )
-        
-        tags_text = response.choices[0].message.content.strip()
+    logger.info("Generating dataset tags using OpenAI for dataset='%s'", dataset_name)
+    tags_text = _chat_completion(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        model=os.getenv("OPENAI_TAG_MODEL", "gpt-3.5-turbo"),
+        max_tokens=100,
+        temperature=0.3
+    )
+
+    if tags_text:
         tags = [tag.strip().lower() for tag in tags_text.split(",") if tag.strip()]
-        return tags[:5]  
-        
-    except Exception as e:
-        print(f"[warn] OpenAI tag generation failed: {e}")
-        return []
+        if tags:
+            logger.info("Generated %s tags for dataset='%s'", len(tags), dataset_name)
+            return tags[:5]
+
+    logger.warning("Falling back to heuristic tag generation for dataset='%s'", dataset_name)
+    fallback_tags = _generate_basic_tags(dataset_name, description, schema)
+    logger.debug("Heuristic tags for dataset='%s': %s", dataset_name, fallback_tags)
+    return fallback_tags
 
 def _enhance_dataset_insights(dataset_name: str, description: str, profile: Dict[str, Any]) -> List[str]:
     """Generate AI-enhanced insights about the dataset"""
-    if not OPENAI_API_KEY or not profile:
+    if not profile:
         return _generate_basic_insights(profile)
-    
-    try:
-        sample_rows = profile.get("sample_rows", [])[:3]
-        schema = profile.get("dtypes", {})
-        
-        system_prompt = """You are a data analyst providing insights about datasets. 
+
+    sample_rows = profile.get("sample_rows", [])[:3]
+    schema = profile.get("dtypes", {})
+
+    system_prompt = """You are a data analyst providing insights about datasets. 
 Generate 4-6 bullet-point insights that help users understand:
 - Data characteristics and patterns
 - Potential use cases and applications  
@@ -415,7 +650,7 @@ Generate 4-6 bullet-point insights that help users understand:
 
 Keep insights concise, factual, and actionable. Focus on what makes this dataset valuable or noteworthy."""
 
-        user_prompt = f"""Dataset: {dataset_name}
+    user_prompt = f"""Dataset: {dataset_name}
 Description: {description or "No description provided"}
 Rows: {profile.get('rows', 0):,}
 Columns: {profile.get('cols', 0)}
@@ -424,37 +659,35 @@ Sample data: {str(sample_rows) if sample_rows else "No sample available"}
 
 Generate 4-6 key insights about this dataset:"""
 
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            max_tokens=300,
-            temperature=0.4
-        )
-        
-        insights_text = response.choices[0].message.content.strip()
+    logger.info("Generating AI insights for dataset='%s'", dataset_name)
+    insights_text = _chat_completion(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        model=os.getenv("OPENAI_INSIGHTS_MODEL", "gpt-3.5-turbo"),
+        max_tokens=300,
+        temperature=0.4
+    )
+
+    if insights_text:
         insights = [insight.strip().lstrip("•-*").strip() for insight in insights_text.split("\n") if insight.strip()]
-        return insights[:6] + _generate_basic_insights(profile)  # Combine AI + basic insights
-        
-    except Exception as e:
-        print(f"[warn] OpenAI insight generation failed: {e}")
-        return _generate_basic_insights(profile)
+        if insights:
+            logger.info("Generated %s AI insights for dataset='%s'", len(insights), dataset_name)
+            return insights[:6] + _generate_basic_insights(profile)
 
-    return insights
+    logger.warning("Falling back to basic insights for dataset='%s'", dataset_name)
+    return _generate_basic_insights(profile)
 
 def _generate_ai_model_card(dataset_name: str, description: str, profile: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate a comprehensive AI model card in JSON format"""
-    if not OPENAI_API_KEY or not profile:
+    """Generate a comprehensive AI model card in JSON format with fallback"""
+    if not profile:
         return {}
-    
-    try:
-        sample_rows = profile.get("sample_rows", [])[:5]
-        schema = profile.get("dtypes", {})
-        
-        system_prompt = """You are a data science expert creating professional dataset model cards. Generate a comprehensive JSON model card that includes:
+
+    sample_rows = profile.get("sample_rows", [])[:5]
+    schema = profile.get("dtypes", {})
+
+    system_prompt = """You are a data science expert creating professional dataset model cards. Generate a comprehensive JSON model card that includes:
 
 1. Dataset Overview (purpose, domain, key characteristics)
 2. Data Description (structure, features, target variables if applicable)  
@@ -496,7 +729,7 @@ Return ONLY valid JSON in this exact structure:
   }
 }"""
 
-        user_prompt = f"""Dataset: {dataset_name}
+    user_prompt = f"""Dataset: {dataset_name}
 Description: {description or "No description provided"}
 Rows: {profile.get('rows', 0):,}
 Columns: {profile.get('cols', 0)}
@@ -506,116 +739,31 @@ Null counts: {profile.get('null_counts', {})}
 
 Generate a comprehensive model card JSON for this dataset:"""
 
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            max_tokens=1000,
-            temperature=0.2
-        )
-        
-        ai_card_text = response.choices[0].message.content.strip()
-        
-        
+    logger.info("Generating AI model card for dataset='%s'", dataset_name)
+    ai_card_text = _chat_completion(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        model=os.getenv("OPENAI_MODEL_CARD_MODEL", "gpt-3.5-turbo"),
+        max_tokens=1000,
+        temperature=0.2
+    )
+
+    if ai_card_text:
         try:
             ai_model_card = json.loads(ai_card_text)
+            logger.info("Generated AI model card for dataset='%s'", dataset_name)
             return ai_model_card
         except json.JSONDecodeError:
-          
-            print(f"[warn] Failed to parse AI model card JSON: {ai_card_text[:200]}...")
-            return {}
-        
-    except Exception as e:
-        print(f"[warn] AI model card generation failed: {e}")
-        return {}
+            logger.warning(
+                "Failed to parse AI model card JSON for dataset='%s': %s",
+                dataset_name,
+                ai_card_text[:200],
+            )
 
-def _generate_ai_model_card(dataset_name: str, description: str, profile: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate a comprehensive AI model card in JSON format"""
-    if not OPENAI_API_KEY or not profile:
-        return {}
-    
-    try:
-        sample_rows = profile.get("sample_rows", [])[:5]
-        schema = profile.get("dtypes", {})
-        
-        system_prompt = """You are a data science expert creating professional dataset model cards. Generate a comprehensive JSON model card that includes:
-
-1. Dataset Overview (purpose, domain, key characteristics)
-2. Data Description (structure, features, target variables if applicable)  
-3. Data Collection (methodology, sources, timeframe when inferable)
-4. Data Quality Assessment (completeness, consistency, potential issues)
-5. Intended Use Cases (primary applications, suitable tasks)
-6. Limitations and Considerations (biases, constraints, ethical considerations)
-7. Technical Details (format, size, preprocessing recommendations)
-
-Make the model card professional, informative, and actionable. Focus on insights that help users understand if this dataset fits their needs. Be specific about data characteristics you can observe from the schema and samples.
-
-Return ONLY valid JSON in this exact structure:
-{
-  "overview": {
-    "purpose": "string",
-    "domain": "string", 
-    "keyCharacteristics": ["string"]
-  },
-  "dataDescription": {
-    "structure": "string",
-    "features": ["string"],
-    "targetVariable": "string or null"
-  },
-  "dataCollection": {
-    "methodology": "string",
-    "sources": "string",
-    "timeframe": "string"
-  },
-  "dataQuality": {
-    "completeness": "string",
-    "consistency": "string", 
-    "potentialIssues": ["string"]
-  },
-  "intendedUseCases": ["string"],
-  "limitations": ["string"],
-  "technicalDetails": {
-    "format": "string",
-    "recommendedPreprocessing": ["string"]
-  }
-}"""
-
-        user_prompt = f"""Dataset: {dataset_name}
-Description: {description or "No description provided"}
-Rows: {profile.get('rows', 0):,}
-Columns: {profile.get('cols', 0)}
-Schema: {dict(list(schema.items())[:15])}
-Sample data (first 5 rows): {str(sample_rows) if sample_rows else "No sample available"}
-Null counts: {profile.get('null_counts', {})}
-
-Generate a comprehensive model card JSON for this dataset:"""
-
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            max_tokens=1000,
-            temperature=0.2
-        )
-        
-        ai_card_text = response.choices[0].message.content.strip()
-        
-        try:
-            ai_model_card = json.loads(ai_card_text)
-            return ai_model_card
-        except json.JSONDecodeError:
-            print(f"[warn] Failed to parse AI model card JSON: {ai_card_text[:200]}...")
-            return {}
-        
-    except Exception as e:
-        print(f"[warn] AI model card generation failed: {e}")
-        return {}
+    logger.warning("Using basic model card fallback for dataset='%s'", dataset_name)
+    return _build_basic_model_card(dataset_name, description, profile)
 
 def _compute_embedding_from_profile(profile: Dict[str, Any]) -> List[float]:
     dim = EMBED_DIM
@@ -695,7 +843,13 @@ def datasets_bp(Session, s3):
 
         sess = Session()
         try:
+            current_app.logger.info(
+                "Creating dataset slug=%s owner=%s",
+                data.get("slug"),
+                data.get("ownerId"),
+            )
             if sess.query(Dataset).filter_by(slug=data["slug"]).first():
+                current_app.logger.warning("Dataset slug conflict slug=%s", data.get("slug"))
                 return jsonify({"error": "slug already exists"}), 409
 
             ds = Dataset(
@@ -710,9 +864,11 @@ def datasets_bp(Session, s3):
             )
             sess.add(ds)
             sess.commit()
+            current_app.logger.info("Dataset created id=%s slug=%s", ds.id, ds.slug)
             return jsonify({"id": ds.id, "slug": ds.slug, "name": ds.name}), 201
         except SQLAlchemyError as e:
             sess.rollback()
+            current_app.logger.exception("Failed to create dataset slug=%s", data.get("slug"))
             return jsonify({"error": str(e)}), 500
         finally:
             sess.close()
@@ -760,6 +916,7 @@ def datasets_bp(Session, s3):
         try:
             ds = sess.query(Dataset).filter_by(slug=slug).first()
             if not ds:
+                current_app.logger.warning("Dataset not found for upload slug=%s", slug)
                 return jsonify({"error": "dataset not found"}), 404
 
             authorId = request.form.get("authorId")
@@ -778,16 +935,33 @@ def datasets_bp(Session, s3):
             file_size = len(content)
             content_type = _infer_content_type(filename)
 
+            current_app.logger.info(
+                "Uploading dataset version slug=%s user=%s file=%s size=%s",
+                slug,
+                authorId,
+                filename,
+                file_size,
+            )
+
             today = dt.datetime.utcnow().date().isoformat()
             s3_key = f"datasets/{slug}/{today}/{uuid.uuid4().hex}_{filename}"
             try:
                 s3.put_object(Bucket=S3_BUCKET, Key=s3_key, Body=content, ContentType=content_type)
             except ClientError as ce:
+                current_app.logger.exception(
+                    "S3 upload failed slug=%s file=%s", slug, filename
+                )
                 return jsonify({"error": f"S3 upload failed: {str(ce)}"}), 502
 
             # CSV profiling -> update dataset-level model card JSON
             profile = _profile_csv_bytes(content) if filename.lower().endswith(".csv") else {}
             if profile:
+                current_app.logger.info(
+                    "Generating dataset card slug=%s rows=%s cols=%s",
+                    slug,
+                    profile.get("rows"),
+                    profile.get("cols"),
+                )
                 ds.dataCard = _make_dataset_card(ds.name, profile, ds.description)
                 
                 # Auto-generate tags if none provided
@@ -800,9 +974,18 @@ def datasets_bp(Session, s3):
                     )
                     if generated_tags:
                         ds.tags = generated_tags
-                        
+                        current_app.logger.info(
+                            "Applied generated tags slug=%s tags=%s",
+                            slug,
+                            generated_tags,
+                        )
+
             ds.updatedAt = dt.datetime.utcnow()
             sess.commit()
+
+            current_app.logger.debug(
+                "Dataset metadata updated slug=%s version_pending", slug
+            )
 
             version_label = _next_version_label(sess, ds.id)
 
@@ -821,6 +1004,11 @@ def datasets_bp(Session, s3):
             )
             sess.add(dv)
             sess.commit()
+            current_app.logger.info(
+                "Created dataset version dataset_id=%s version=%s",
+                ds.id,
+                dv.version,
+            )
 
             if profile:
                 vec = _compute_embedding_from_profile(profile)
@@ -835,6 +1023,9 @@ def datasets_bp(Session, s3):
                         "updated_at": dt.datetime.utcnow(),
                     }},
                     upsert=True
+                )
+                current_app.logger.debug(
+                    "Updated embedding slug=%s version_id=%s", ds.slug, dv.id
                 )
 
             return jsonify({
@@ -853,6 +1044,9 @@ def datasets_bp(Session, s3):
             }), 201
         except SQLAlchemyError as e:
             sess.rollback()
+            current_app.logger.exception(
+                "Database error while uploading version slug=%s", slug
+            )
             return jsonify({"error": str(e)}), 500
         finally:
             sess.close()

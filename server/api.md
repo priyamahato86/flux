@@ -1,20 +1,8 @@
+# Flux API — Reference
 
----
-
-# Open Data Platform API
-
-Base URL: `https://<your-domain>`
-Content types: `application/json` unless noted
-
-Standard error shape:
-
-```json
-{ "error": "human-readable message" }
-```
-
-## Auth
-
-For now, endpoints accept `authorId` / `ownerId` in the payload. (Replace with JWT/RBAC later.)
+Base URL: `https://<your-host>`
+All responses are JSON. Timestamps are ISO 8601 (UTC). Common error shape: `{"error":"<message>"}`.
+Requests/Responses include an `X-Request-ID` header for tracing.
 
 ---
 
@@ -22,41 +10,19 @@ For now, endpoints accept `authorId` / `ownerId` in the payload. (Replace with J
 
 ### GET `/health`
 
-**Desc:** Liveness check.
+**Desc:** Liveness probe.
 
-**Response 200**
+**cURL**
 
-```json
-{ "ok": true, "time": "2025-09-20T07:05:00.123456" }
+```bash
+curl -s https://<host>/health
 ```
 
----
-
-## Users
-
-### POST `/users`
-
-**Desc:** Create a user (needed to reference `ownerId`/`authorId`).
-
-**Body**
+**Sample Response**
 
 ```json
-{
-  "email": "alice@example.com",
-  "username": "alice",
-  "name": "Alice",
-  "avatar": "https://...",
-  "bio": "Data scientist"
-}
+{"ok": true, "time": "2025-09-20T08:40:18.925764"}
 ```
-
-**Response 201**
-
-```json
-{ "id": "uuid", "email": "alice@example.com", "username": "alice" }
-```
-
-`GET /users/:id` is not exposed in this API. (Add if needed.)
 
 ---
 
@@ -64,54 +30,63 @@ For now, endpoints accept `authorId` / `ownerId` in the payload. (Replace with J
 
 ### POST `/datasets`
 
-**Desc:** Create dataset (owner is a User).
+**Desc:** Create a dataset.
 
 **Body**
 
 ```json
 {
-  "name": "Global Education Index",
-  "slug": "global-education-index",
+  "name": "NYC Taxi",
+  "slug": "nyc-taxi",
   "license": "CC-BY-4.0",
-  "ownerId": "uuid-of-user",
-  "description": "Index across countries",
-  "authorNote": "Initial seed",
-  "isPrivate": false,
-  "tags": ["education", "sdg4"]
+  "ownerId": "user-123",
+  "description": "Yellow taxi trips"
 }
 ```
 
-**Response 201**
+**cURL**
 
-```json
-{ "id": "uuid", "slug": "global-education-index", "name": "Global Education Index" }
+```bash
+curl -X POST https://<host>/datasets \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"NYC Taxi","slug":"nyc-taxi","license":"CC-BY-4.0","ownerId":"user-123","description":"Yellow taxi trips"}'
 ```
 
-**Errors:** 409 slug exists, 400 invalid ownerId.
+**Sample Response (201)**
+
+```json
+{"id":"a3b8...","slug":"nyc-taxi","name":"NYC Taxi"}
+```
 
 ---
 
 ### GET `/datasets`
 
-**Desc:** List datasets (no pagination yet).
+**Desc:** List datasets (newest first).
 
-**Response 200**
+**cURL**
+
+```bash
+curl -s https://<host>/datasets
+```
+
+**Sample Response**
 
 ```json
 [
   {
-    "id": "uuid",
-    "name": "Global Education Index",
-    "slug": "global-education-index",
-    "license": "CC-BY-4.0",
-    "description": "Index across countries",
-    "authorNote": "Initial seed",
-    "isPrivate": false,
-    "tags": ["education","sdg4"],
-    "dataCard": { "...": "optional model card JSON" },
-    "ownerId": "uuid",
-    "createdAt": "2025-09-20T07:05:00.000Z",
-    "updatedAt": "2025-09-20T07:05:00.000Z"
+    "id":"a3b8...",
+    "name":"NYC Taxi",
+    "slug":"nyc-taxi",
+    "license":"CC-BY-4.0",
+    "description":"Yellow taxi trips",
+    "authorNote":null,
+    "isPrivate":false,
+    "tags":["transport","time-series","ml"],
+    "dataCard":{ "...": "..." },
+    "ownerId":"user-123",
+    "createdAt":"2025-09-20T08:10:00",
+    "updatedAt":"2025-09-20T08:12:30"
   }
 ]
 ```
@@ -122,106 +97,138 @@ For now, endpoints accept `authorId` / `ownerId` in the payload. (Replace with J
 
 **Desc:** Get dataset by slug.
 
-**Response 200**
+**cURL**
+
+```bash
+curl -s https://<host>/datasets/nyc-taxi
+```
+
+**Sample Response**
 
 ```json
 {
-  "id": "uuid",
-  "name": "Global Education Index",
-  "slug": "global-education-index",
-  "license": "CC-BY-4.0",
-  "description": "Index across countries",
-  "authorNote": "Initial seed",
-  "isPrivate": false,
-  "tags": ["education","sdg4"],
-  "dataCard": { "...": "optional model card JSON" },
-  "ownerId": "uuid",
-  "createdAt": "2025-09-20T07:05:00.000Z",
-  "updatedAt": "2025-09-20T07:05:00.000Z"
+  "id":"a3b8...",
+  "name":"NYC Taxi",
+  "slug":"nyc-taxi",
+  "license":"CC-BY-4.0",
+  "description":"Yellow taxi trips",
+  "authorNote":null,
+  "isPrivate":false,
+  "tags":["transport","time-series","ml"],
+  "dataCard":{ "...": "..." },
+  "ownerId":"user-123",
+  "createdAt":"2025-09-20T08:10:00",
+  "updatedAt":"2025-09-20T08:12:30"
 }
 ```
-
-**Errors:** 404 not found.
 
 ---
 
-### POST `/datasets/{slug}/upload`  *(multipart/form-data)*
+### POST `/datasets/{slug}/upload`
 
-**Desc:** Upload a new dataset version to S3 and create a `DatasetVersion`. Generates/updates dataset-level `dataCard` when CSV.
+**Desc:** Upload a new version (CSV/JSON/Parquet supported). CSVs are profiled to update `dataCard`, tags, and embeddings.
 
 **Form fields**
 
-* `file` (required): CSV/JSON/Parquet
-* `authorId` (required): `User.id` → stored in `commitUser`
+* `authorId` (required)
 * `commitMessage` (optional)
+* `file` (required; multipart)
 
-**Response 201**
+**cURL**
+
+```bash
+curl -X POST https://<host>/datasets/nyc-taxi/upload \
+  -F authorId=user-123 \
+  -F commitMessage='Initial upload' \
+  -F file=@/path/to/trips.csv
+```
+
+**Sample Response (201)**
 
 ```json
 {
-  "dataset": { "id": "uuid", "slug": "global-education-index", "name": "Global Education Index" },
+  "dataset": {"id":"a3b8...","slug":"nyc-taxi","name":"NYC Taxi"},
   "version": {
-    "id": "uuid",
-    "version": "v3",
-    "fileName": "gei_2025.csv",
-    "fileSize": 123456,
-    "commitUser": "uuid-of-user",
-    "commitMessage": "Upload gei_2025.csv",
-    "isLatest": true,
-    "createdAt": "2025-09-20T07:05:00.000Z"
+    "id":"v-uuid...",
+    "version":"v1",
+    "fileName":"trips.csv",
+    "fileSize":1234567,
+    "commitUser":"user-123",
+    "commitMessage":"Upload trips.csv",
+    "isLatest":true,
+    "createdAt":"2025-09-20T08:12:30"
   },
-  "datasetCard": { "...": "model card JSON if CSV" }
+  "datasetCard": { "...": "..." }
 }
-```
-
-**Errors:** 404 dataset, 400 authorId/file invalid, 502 S3 error.
-
-**curl**
-
-```bash
-curl -X POST https://api.example.com/datasets/global-education-index/upload \
-  -F authorId=USER_UUID \
-  -F commitMessage="Upload v3" \
-  -F file=@./data/gei_2025.csv
 ```
 
 ---
 
 ### GET `/datasets/{slug}/versions`
 
-**Desc:** List all versions for a dataset (latest first).
+**Desc:** List versions for a dataset (newest first).
 
-**Response 200**
+**cURL**
+
+```bash
+curl -s https://<host>/datasets/nyc-taxi/versions
+```
+
+**Sample Response**
 
 ```json
 [
   {
-    "id": "uuid",
-    "version": "v3",
-    "fileUrl": "datasets/global-education-index/2025-09-20/<uuid>_gei_2025.csv",
-    "fileName": "gei_2025.csv",
-    "fileSize": 123456,
-    "commitMessage": "Upload v3",
-    "commitUser": "uuid-of-user",
-    "isLatest": true,
-    "createdAt": "2025-09-20T07:05:00.000Z"
+    "id":"v-uuid-2",
+    "version":"v2",
+    "fileUrl":"datasets/nyc-taxi/2025-09-20/abcd_trips.csv",
+    "fileName":"trips.csv",
+    "fileSize":1250000,
+    "commitMessage":"Fix header issues",
+    "commitUser":"user-123",
+    "isLatest":true,
+    "createdAt":"2025-09-20T10:01:00"
+  },
+  {
+    "id":"v-uuid-1",
+    "version":"v1",
+    "fileUrl":"datasets/nyc-taxi/2025-09-20/efgh_trips.csv",
+    "fileName":"trips.csv",
+    "fileSize":1234567,
+    "commitMessage":"Upload trips.csv",
+    "commitUser":"user-123",
+    "isLatest":false,
+    "createdAt":"2025-09-20T08:12:30"
   }
 ]
 ```
 
 ---
 
-### GET `/datasets/{slug}/download_url?version_id={uuid}`
+### GET `/datasets/{slug}/download_url[?version_id=...]`
 
-**Desc:** Get a presigned S3 download URL. If `version_id` omitted, uses the latest version.
+**Desc:** Get a time-limited S3 presigned URL for the latest or a specific version.
 
-**Response 200**
+**cURL (latest)**
 
-```json
-{ "url": "https://s3...", "version_id": "uuid" }
+```bash
+curl -s 'https://<host>/datasets/nyc-taxi/download_url'
 ```
 
-**Errors:** 404 dataset or no versions, 502 presign failed.
+**cURL (specific version)**
+
+```bash
+curl -s 'https://<host>/datasets/nyc-taxi/download_url?version_id=v-uuid-2'
+```
+
+**Sample Response**
+
+```json
+{
+  "url":"https://s3.amazonaws.com/...&X-Amz-Signature=...",
+  "version_id":"v-uuid-2"
+}
+```
 
 ---
 
@@ -229,26 +236,32 @@ curl -X POST https://api.example.com/datasets/global-education-index/upload \
 
 ### POST `/issues/{dataset_slug}`
 
-**Desc:** Create an issue on a dataset.
+**Desc:** Open an issue for a dataset.
 
 **Body**
 
 ```json
 {
-  "title": "Column mismatch",
-  "description": "The latest CSV has an extra column",
+  "title": "Column types look wrong",
+  "description": "pickup_datetime parsed as object.",
   "labels": ["bug","schema"],
-  "authorId": "uuid-of-user"
+  "authorId": "user-123"
 }
 ```
 
-**Response 201**
+**cURL**
 
-```json
-{ "id": "uuid", "status": "OPEN" }
+```bash
+curl -X POST https://<host>/issues/nyc-taxi \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Column types look wrong","description":"pickup_datetime parsed as object.","labels":["bug","schema"],"authorId":"user-123"}'
 ```
 
-**Errors:** 404 dataset, 400 invalid authorId.
+**Sample Response (201)**
+
+```json
+{"id":"issue-uuid...","status":"OPEN"}
+```
 
 ---
 
@@ -256,20 +269,26 @@ curl -X POST https://api.example.com/datasets/global-education-index/upload \
 
 **Desc:** List issues for a dataset.
 
-**Response 200**
+**cURL**
+
+```bash
+curl -s https://<host>/issues/nyc-taxi
+```
+
+**Sample Response**
 
 ```json
 [
   {
-    "id": "uuid",
-    "title": "Column mismatch",
-    "description": "The latest CSV has an extra column",
-    "status": "OPEN",
-    "labels": ["bug","schema"],
-    "authorId": "uuid",
-    "createdAt": "2025-09-20T07:05:00.000Z",
-    "updatedAt": "2025-09-20T07:05:00.000Z",
-    "closedAt": null
+    "id":"issue-uuid...",
+    "title":"Column types look wrong",
+    "description":"pickup_datetime parsed as object.",
+    "status":"OPEN",
+    "labels":["bug","schema"],
+    "authorId":"user-123",
+    "createdAt":"2025-09-20T09:00:00",
+    "updatedAt":"2025-09-20T09:00:00",
+    "closedAt":null
   }
 ]
 ```
@@ -283,16 +302,22 @@ curl -X POST https://api.example.com/datasets/global-education-index/upload \
 **Body**
 
 ```json
-{ "content": "Can you share the header row?", "authorId": "uuid-of-user" }
+{"content":"Can you share sample rows?","authorId":"user-456"}
 ```
 
-**Response 201**
+**cURL**
+
+```bash
+curl -X POST https://<host>/issues/comment/issue-uuid \
+  -H 'Content-Type: application/json' \
+  -d '{"content":"Can you share sample rows?","authorId":"user-456"}'
+```
+
+**Sample Response (201)**
 
 ```json
-{ "ok": true }
+{"ok": true}
 ```
-
-**Errors:** 404 issue, 400 invalid authorId.
 
 ---
 
@@ -300,76 +325,94 @@ curl -X POST https://api.example.com/datasets/global-education-index/upload \
 
 **Desc:** Close an issue.
 
-**Response 200**
+**cURL**
 
-```json
-{ "ok": true }
+```bash
+curl -X POST https://<host>/issues/close/issue-uuid
 ```
 
-**Errors:** 404 issue.
+**Sample Response**
+
+```json
+{"ok": true}
+```
 
 ---
 
 ## Pull Requests
 
+> Use PRs to propose a replacement file. You provide an already-uploaded object key via `modifiedFileUrl` (e.g., an S3 key), not the bytes themselves.
+
 ### POST `/pulls/open`
 
-**Desc:** Open a PR proposing dataset changes. Stores PR metadata only (per schema). Returns **transient diff preview** (not persisted) if CSV and base found.
+**Desc:** Open a pull request against a dataset. Returns a lightweight CSV diff preview when base & PR are CSV.
 
 **Body**
 
 ```json
 {
-  "dataset_slug": "global-education-index",
-  "title": "Update 2025 rows",
-  "description": "Adds new countries and fixes typos",
-  "authorId": "uuid-of-user",
-  "modifiedFileUrl": "datasets/global-education-index/2025-09-20/<uuid>_proposal.csv",
-  "modifiedFileName": "proposal.csv",
-  "against_version_id": "uuid-of-base-version"  // optional; defaults to dataset latest
+  "dataset_slug":"nyc-taxi",
+  "title":"Fix headers, add 2025 trips",
+  "description":"Normalized header case and added new rows.",
+  "authorId":"user-456",
+  "modifiedFileUrl":"datasets/nyc-taxi/tmp/new_trips.csv",
+  "modifiedFileName":"new_trips.csv",
+  "against_version_id":"v-uuid-1"
 }
 ```
 
-**Response 201**
+**cURL**
+
+```bash
+curl -X POST https://<host>/pulls/open \
+  -H 'Content-Type: application/json' \
+  -d '{"dataset_slug":"nyc-taxi","title":"Fix headers, add 2025 trips","description":"Normalized header case and added new rows.","authorId":"user-456","modifiedFileUrl":"datasets/nyc-taxi/tmp/new_trips.csv","modifiedFileName":"new_trips.csv","against_version_id":"v-uuid-1"}'
+```
+
+**Sample Response (201)**
 
 ```json
 {
-  "pull_id": "uuid",
-  "status": "OPEN",
-  "diff_preview": {
-    "added_count": 12,
+  "pull_id":"pr-uuid...",
+  "status":"OPEN",
+  "diff_preview":{
+    "added_count": 1200,
     "removed_count": 0,
     "modified_count": 3,
-    "sample_added": ["row-as-string|..."],
+    "sample_added": ["..."],
     "sample_removed": [],
     "sample_modified": [
-      { "id": "rowKey", "before": { "col":"val" }, "after": { "col":"new" } }
+      {"id":"1001","before":{"vendor":"1"},"after":{"vendor":"2"}}
     ]
   }
 }
 ```
 
-**Errors:** 404 dataset, 400 invalid authorId, 201 even if diff can’t be computed (diff will be empty).
-
 ---
 
 ### POST `/pulls/merge/{pull_id}`
 
-**Desc:** Merge PR by **creating a new `DatasetVersion`** from `modifiedFileUrl`, set it as latest, and mark PR `MERGED`.
+**Desc:** Merge PR → creates a new `DatasetVersion` from `modifiedFileUrl`, refreshes dataset card if CSV.
 
 **Body**
 
 ```json
-{ "commitUser": "uuid-of-user", "commitMessage": "Merge PR" }
+{"commitUser":"user-999","commitMessage":"Merge PR #12"}
 ```
 
-**Response 200**
+**cURL**
+
+```bash
+curl -X POST https://<host>/pulls/merge/pr-uuid \
+  -H 'Content-Type: application/json' \
+  -d '{"commitUser":"user-999","commitMessage":"Merge PR #12"}'
+```
+
+**Sample Response**
 
 ```json
-{ "ok": true, "merged_version_id": "uuid", "pr_status": "MERGED" }
+{"ok": true, "merged_version_id":"v-uuid-3", "pr_status":"MERGED"}
 ```
-
-**Errors:** 404 pull, 409 closed PR, 400 invalid commitUser.
 
 ---
 
@@ -377,13 +420,17 @@ curl -X POST https://api.example.com/datasets/global-education-index/upload \
 
 **Desc:** Close PR without merging.
 
-**Response 200**
+**cURL**
 
-```json
-{ "ok": true }
+```bash
+curl -X POST https://<host>/pulls/close/pr-uuid
 ```
 
-**Errors:** 404 pull.
+**Sample Response**
+
+```json
+{"ok": true}
+```
 
 ---
 
@@ -394,16 +441,22 @@ curl -X POST https://api.example.com/datasets/global-education-index/upload \
 **Body**
 
 ```json
-{ "content": "Looks good, please add a README.", "authorId": "uuid-of-user" }
+{"content":"Looks good. Any schema drift?","authorId":"user-123"}
 ```
 
-**Response 201**
+**cURL**
+
+```bash
+curl -X POST https://<host>/pulls/comment/pr-uuid \
+  -H 'Content-Type: application/json' \
+  -d '{"content":"Looks good. Any schema drift?","authorId":"user-123"}'
+```
+
+**Sample Response (201)**
 
 ```json
-{ "ok": true }
+{"ok": true}
 ```
-
-**Errors:** 404 pull, 400 invalid authorId.
 
 ---
 
@@ -411,49 +464,61 @@ curl -X POST https://api.example.com/datasets/global-education-index/upload \
 
 ### POST `/notebooks`
 
-**Desc:** Create a notebook record (bind to dataset optional).
+**Desc:** Create a notebook (optionally link to a dataset).
 
 **Body**
 
 ```json
 {
-  "title": "Exploration on GEI",
-  "authorId": "uuid-of-user",
-  "description": "EDA notebook",
-  "fileUrl": "notebooks/<uuid>.ipynb",
-  "isPublic": true,
-  "datasetId": "uuid-of-dataset"  // optional
+  "title":"EDA on NYC Taxi",
+  "authorId":"user-123",
+  "description":"Quick EDA",
+  "fileUrl":"s3://.../eda.ipynb",
+  "isPublic":true,
+  "datasetId":"a3b8..."
 }
 ```
 
-**Response 201**
+**cURL**
 
-```json
-{ "id": "uuid" }
+```bash
+curl -X POST https://<host>/notebooks \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"EDA on NYC Taxi","authorId":"user-123","description":"Quick EDA","fileUrl":"s3://.../eda.ipynb","isPublic":true,"datasetId":"a3b8..."}'
 ```
 
-**Errors:** 400 invalid authorId/datasetId.
+**Sample Response (201)**
+
+```json
+{"id":"nb-uuid..."}
+```
 
 ---
 
 ### GET `/notebooks`
 
-**Desc:** List notebooks.
+**Desc:** List notebooks (newest first).
 
-**Response 200**
+**cURL**
+
+```bash
+curl -s https://<host>/notebooks
+```
+
+**Sample Response**
 
 ```json
 [
   {
-    "id": "uuid",
-    "title": "Exploration on GEI",
-    "description": "EDA notebook",
-    "fileUrl": "notebooks/<uuid>.ipynb",
-    "isPublic": true,
-    "authorId": "uuid",
-    "datasetId": "uuid-or-null",
-    "createdAt": "2025-09-20T07:05:00.000Z",
-    "updatedAt": "2025-09-20T07:05:00.000Z"
+    "id":"nb-uuid...",
+    "title":"EDA on NYC Taxi",
+    "description":"Quick EDA",
+    "fileUrl":"s3://.../eda.ipynb",
+    "isPublic":true,
+    "authorId":"user-123",
+    "datasetId":"a3b8...",
+    "createdAt":"2025-09-20T09:30:00",
+    "updatedAt":"2025-09-20T09:30:00"
   }
 ]
 ```
@@ -462,96 +527,60 @@ curl -X POST https://api.example.com/datasets/global-education-index/upload \
 
 ## Recommendations
 
-### GET `/recommendations?dataset_slug={slug}&k=5`
+### GET `/recommendations?dataset_slug={slug}&k={k}`
 
-**Desc:** Returns k nearest datasets by vector similarity (MongoDB Atlas Vector Search placeholder backed by your current embedding upserts).
+**Desc:** Get up to `k` related datasets by cosine similarity of schema-derived embeddings.
 
-**Response 200**
+**Params**
+
+* `dataset_slug` (required)
+* `k` (optional, default `5`)
+
+**cURL**
+
+```bash
+curl -s 'https://<host>/recommendations?dataset_slug=nyc-taxi&k=3'
+```
+
+**Sample Response**
 
 ```json
 [
-  {
-    "dataset_id": "uuid",
-    "slug": "another-dataset",
-    "score": 0.83,
-    "schema_sample": { "colA": "float64", "colB": "string" }
-  }
+  {"dataset_id":"b7c1...","slug":"chicago-taxi","score":0.91,"schema_sample":{"trip_id":"int64","fare":"float64"}},
+  {"dataset_id":"9f20...","slug":"sf-taxi","score":0.88,"schema_sample":{"trip_id":"int64","fare":"float64"}}
 ]
 ```
 
-**Errors:** 400 missing slug, 404 no embedding.
+---
+
+## Notes & Behaviors
+
+* **CSV profiling:** On upload or merge of a CSV, the server computes a dataset profile, updates `Dataset.dataCard`, and (if no tags set) may generate tags. If `OPENAI_API_KEY` is unset, it falls back to heuristic tags/insights.
+* **Storage:** File bytes live in S3. Endpoints accept/return S3 keys (e.g., `datasets/<slug>/.../uuid_filename.csv`). Use `/download_url` to obtain a presigned URL.
+* **Versioning:** Semantic labels are auto-generated (`v1`, `v2`, ...). Exactly one version is `isLatest=true`.
+* **Issues & PRs:** Comments are supported on both; status transitions are explicit endpoints.
+* **Logging:** Every request logs start/end and adds `X-Request-ID` to the response.
 
 ---
 
-## Notes & Limits
+## Quick Error Examples
 
-* **Version labels:** automatically assigned `v1`, `v2`, …
-* **`isLatest`:** backend ensures only one latest per dataset.
-* **Presigned URLs:** valid for \~1 hour.
-* **Diff preview:** transient only; computed on PR open when `modifiedFileName` ends with `.csv`.
-* **DataCard:** stored at **dataset** level (`Dataset.dataCard`). Per schema, `DatasetVersion` has no JSON fields.
+**Conflict (slug exists)**
 
----
-
-## Quick cURL Examples
-
-Create user:
-
-```bash
-curl -X POST https://api.example.com/users \
-  -H "Content-Type: application/json" \
-  -d '{"email":"a@ex.com","username":"alice"}'
+```json
+{"error":"slug already exists"}
 ```
 
-Create dataset:
+**Not Found (dataset / issue / PR)**
 
-```bash
-curl -X POST https://api.example.com/datasets \
-  -H "Content-Type: application/json" \
-  -d '{"name":"GEI","slug":"gei","license":"CC-BY-4.0","ownerId":"USER_UUID","tags":["sdg4"]}'
+```json
+{"error":"dataset not found"}
 ```
 
-Upload version:
+**Validation**
 
-```bash
-curl -X POST https://api.example.com/datasets/gei/upload \
-  -F authorId=USER_UUID \
-  -F file=@./data/gei.csv
-```
-
-Open PR:
-
-```bash
-curl -X POST https://api.example.com/pulls/open \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset_slug":"gei",
-    "title":"update 2025",
-    "description":"adds rows",
-    "authorId":"USER_UUID",
-    "modifiedFileUrl":"datasets/gei/2025-09-20/<uuid>_proposal.csv",
-    "modifiedFileName":"proposal.csv"
-  }'
-```
-
-Merge PR:
-
-```bash
-curl -X POST https://api.example.com/pulls/merge/PULL_UUID \
-  -H "Content-Type: application/json" \
-  -d '{"commitUser":"USER_UUID","commitMessage":"Merge PR"}'
-```
-
-List versions:
-
-```bash
-curl https://api.example.com/datasets/gei/versions
-```
-
-Get download URL:
-
-```bash
-curl "https://api.example.com/datasets/gei/download_url?version_id=VERSION_UUID"
+```json
+{"error":"name, slug, license, ownerId are required"}
 ```
 
 ---
