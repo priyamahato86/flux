@@ -1,5 +1,7 @@
+"use client"
 import React from "react";
 import { motion } from "framer-motion";
+import Link from "next/link";
 import {
   BrainCircuit,
   Sparkles,
@@ -77,7 +79,6 @@ export default function FluxLanding() {
 
   return (
     <div className="min-h-screen bg-[var(--surface)] text-[var(--ink)]">
-      <Navbar />
       <Hero />
       <LogosStrip />
       <Features />
@@ -93,32 +94,7 @@ export default function FluxLanding() {
   );
 }
 
-function Navbar() {
-  return (
-    <header className="sticky top-0 z-40 w-full border-b border-slate-100/80 backdrop-blur bg-white/75">
-      <Container className="flex h-16 items-center justify-between">
-        <a href="#" className="flex items-center gap-2 font-semibold">
-          <div className="relative h-8 w-8 rounded-xl bg-[var(--primarySoft)]">
-            <div className="absolute inset-0 m-[6px] rounded-lg bg-[var(--primary)]/90" />
-          </div>
-          <span className="text-[var(--ink)]">Flux <span className="text-[var(--primary)]">AI</span></span>
-        </a>
-        <nav className="hidden md:flex items-center gap-6 text-sm text-[var(--subtext)]">
-          <a href="#features" className="hover:text-[var(--ink)]">Features</a>
-          <a href="#how" className="hover:text-[var(--ink)]">How it works</a>
-          <a href="#pricing" className="hover:text-[var(--ink)]">Pricing</a>
-          <a href="#faq" className="hover:text-[var(--ink)]">FAQ</a>
-        </nav>
-        <div className="flex items-center gap-3">
-          <Button className="border border-slate-200 bg-white text-[var(--ink)] hover:bg-[var(--muted)]">Sign in</Button>
-          <Button className="bg-[var(--primary)] text-white hover:bg-[var(--ink)]">
-            Get Started <ArrowRight className="ml-1" size={16} />
-          </Button>
-        </div>
-      </Container>
-    </header>
-  );
-}
+
 
 function Hero() {
   return (
@@ -139,9 +115,11 @@ function Hero() {
             optimized for speed, reproducibility, and collaboration.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <Link href="/signup">
             <Button className="bg-[var(--primary)] text-white hover:bg-[var(--ink)]">
               Start free
             </Button>
+            </Link>
             <Button className="border border-slate-200 bg-white text-[var(--ink)] hover:bg-[var(--muted)]">
               View docs
             </Button>
@@ -451,7 +429,8 @@ function CTA() {
           <h3 className="text-2xl md:text-3xl font-bold">Build like Kaggle. Ship like a pro.</h3>
           <p className="mt-3 text-[var(--subtext)]">Create your first pipeline in minutes and see results the same day.</p>
           <div className="mt-6 flex items-center justify-center gap-3">
-            <Button className="bg-[var(--primary)] text-white hover:bg-[var(--ink)]">Create account</Button>
+            <Link href="/signup">
+            <Button className="bg-[var(--primary)] text-white hover:bg-[var(--ink)]">Create account</Button></Link>
             <Button className="border border-slate-200 bg-white text-[var(--ink)] hover:bg-[var(--muted)]">
               <Github size={16} className="mr-2" /> Star on GitHub
             </Button>
