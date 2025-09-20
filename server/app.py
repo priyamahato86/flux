@@ -32,6 +32,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, scoped_session
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import Enum as SAEnum
+from flask import redirect
 
 
 
@@ -496,26 +497,7 @@ def create_app() -> Flask:
         - You can override via query param: /notebook?url=http://host:8888/notebooks/file.ipynb
         """
         target_url = request.args.get("url") or IFRAME_NOTEBOOK_URL
-        html = f"""<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Notebook</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-      html, body, iframe {{ height: 100%; width: 100%; margin: 0; padding: 0; border: 0; }}
-      body {{ background: #0b0b0c; }}
-    </style>
-  </head>
-  <body>
-    <iframe
-      src="{target_url}"
-      allow="clipboard-read; clipboard-write"
-      referrerpolicy="no-referrer"
-      loading="eager"
-    ></iframe>
-  </body>
-</html>"""
+        return redirect("http://46.202.162.243:8850/notebooks/Untitled.ipynb", code=302)
         resp = make_response(html)
         resp.headers["Content-Type"] = "text/html; charset=utf-8"
         return resp
