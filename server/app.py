@@ -1,4 +1,4 @@
-# app.py
+
 import os
 import io
 import json
@@ -30,7 +30,7 @@ from sqlalchemy.orm import declarative_base, relationship, sessionmaker, scoped_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import Enum as SAEnum
 
-# ---------------------- Config ----------------------
+
 
 load_dotenv()
 
@@ -52,7 +52,7 @@ OPENAI_API_KEY = get_env("OPENAI_API_KEY", required=False)
 def _uuid() -> str:
     return str(uuid.uuid4())
 
-# ---------------------- DB ----------------------
+
 
 Base = declarative_base()
 
@@ -65,7 +65,7 @@ class PRStatus(str, Enum):
     MERGED = "MERGED"
     CLOSED = "CLOSED"
 
-# NOTE: Replicated Prisma schema, including the User model
+
 class User(Base):
     __tablename__ = "User"
     id = Column(String, primary_key=True, default=_uuid)
@@ -210,7 +210,6 @@ class Notebook(Base):
     dataset = relationship("Dataset", back_populates="notebooks")
 
 
-# ---------------------- App Factory ----------------------
 
 def create_app() -> Flask:
     app = Flask(__name__)
@@ -232,10 +231,9 @@ def create_app() -> Flask:
 
     mongo = MongoClient(MONGO_URI)
     app.mongo = mongo
-    app.embed_coll = mongo["flux"]["dataset_embeddings"]  # type: ignore
+    app.embed_coll = mongo["flux"]["dataset_embeddings"] 
     _ensure_mongo_indexes(app.embed_coll)
 
-    # Removed users_bp registration
     app.register_blueprint(datasets_bp(Session, s3), url_prefix="/datasets")
     app.register_blueprint(issues_bp(Session), url_prefix="/issues")
     app.register_blueprint(pulls_bp(Session, s3), url_prefix="/pulls")
@@ -248,7 +246,6 @@ def create_app() -> Flask:
 
     return app
 
-# ---------------------- Helpers ----------------------
 
 def _ensure_mongo_indexes(coll: Collection):
     coll.create_index([("dataset_id", 1)], background=True)
@@ -290,7 +287,6 @@ def _profile_csv_bytes(content: bytes) -> Dict[str, Any]:
                 pass
             return x
 
-        # Get first 10 rows as sample data
         sample_rows = df.head(10).fillna("").to_dict(orient="records")
 
         return {
@@ -305,12 +301,10 @@ def _profile_csv_bytes(content: bytes) -> Dict[str, Any]:
         return {}
 
 def _make_dataset_card(dataset_name: str, profile: Dict[str, Any], dataset_description: str = None) -> Dict[str, Any]:
-    # Stored in Dataset.dataCard (per schema)
-    
-    # Generate AI-enhanced insights
+
     insights = _enhance_dataset_insights(dataset_name, dataset_description, profile)
     
-    # Generate comprehensive AI model card
+   
     ai_model_card = _generate_ai_model_card(dataset_name, dataset_description, profile)
 
     return {
@@ -321,7 +315,7 @@ def _make_dataset_card(dataset_name: str, profile: Dict[str, Any], dataset_descr
             "insights": insights,
             "totalRows": profile.get("rows"),
             "totalColumns": profile.get("cols"),
-            "sampleData": profile.get("sample_rows", [])[:10]  # First 10 rows
+            "sampleData": profile.get("sample_rows", [])[:10]  
         },
         "schema": profile.get("dtypes", {}),
         "dataQuality": {
@@ -331,7 +325,7 @@ def _make_dataset_card(dataset_name: str, profile: Dict[str, Any], dataset_descr
             "completenessScore": _calculate_completeness_score(profile.get("null_counts", {}), profile.get("rows", 1))
         },
         "statisticalSummary": profile.get("summary", {}),
-        "aiModelCard": ai_model_card,  # Add comprehensive AI-generated model card
+        "aiModelCard": ai_model_card, 
         "recommendedUses": [
             "Exploratory data analysis and visualization",
             "Machine learning model training and testing",
@@ -397,7 +391,7 @@ Generate 3-5 relevant tags for this dataset. Return only the tags separated by c
         
         tags_text = response.choices[0].message.content.strip()
         tags = [tag.strip().lower() for tag in tags_text.split(",") if tag.strip()]
-        return tags[:5]  # Ensure max 5 tags
+        return tags[:5]  
         
     except Exception as e:
         print(f"[warn] OpenAI tag generation failed: {e}")
@@ -525,12 +519,12 @@ Generate a comprehensive model card JSON for this dataset:"""
         
         ai_card_text = response.choices[0].message.content.strip()
         
-        # Parse JSON response
+        
         try:
             ai_model_card = json.loads(ai_card_text)
             return ai_model_card
         except json.JSONDecodeError:
-            # Fallback if JSON parsing fails
+          
             print(f"[warn] Failed to parse AI model card JSON: {ai_card_text[:200]}...")
             return {}
         
@@ -612,12 +606,10 @@ Generate a comprehensive model card JSON for this dataset:"""
         
         ai_card_text = response.choices[0].message.content.strip()
         
-        # Parse JSON response
         try:
             ai_model_card = json.loads(ai_card_text)
             return ai_model_card
         except json.JSONDecodeError:
-            # Fallback if JSON parsing fails
             print(f"[warn] Failed to parse AI model card JSON: {ai_card_text[:200]}...")
             return {}
         
@@ -763,12 +755,7 @@ def datasets_bp(Session, s3):
 
     @bp.route("/<slug>/upload", methods=["POST"])
     def upload_version(slug):
-        """
-        Multipart form:
-          - file: CSV/JSON/Parquet
-          - authorId: <opaque string>  (commitUser)
-          - commitMessage?: string
-        """
+      
         sess = Session()
         try:
             ds = sess.query(Dataset).filter_by(slug=slug).first()
@@ -817,7 +804,6 @@ def datasets_bp(Session, s3):
             ds.updatedAt = dt.datetime.utcnow()
             sess.commit()
 
-            # compute next version label
             version_label = _next_version_label(sess, ds.id)
 
             # ensure only one latest
@@ -836,7 +822,6 @@ def datasets_bp(Session, s3):
             sess.add(dv)
             sess.commit()
 
-            # optional embedding upsert
             if profile:
                 vec = _compute_embedding_from_profile(profile)
                 current_app.embed_coll.update_one(
@@ -1017,18 +1002,7 @@ def pulls_bp(Session, s3):
 
     @bp.route("/open", methods=["POST"])
     def open_pull():
-        """
-        Body:
-        {
-          "dataset_slug": "...",
-          "title": "...",
-          "description": "...",
-          "authorId": "<opaque user id>",
-          "modifiedFileUrl": "<s3 key>",
-          "modifiedFileName": "file.csv",
-          "against_version_id": "<optional version id for diff preview>"
-        }
-        """
+        
         data = request.get_json(force=True)
         required = ["dataset_slug", "title", "description", "authorId", "modifiedFileUrl", "modifiedFileName"]
         if any(not data.get(k) for k in required):
@@ -1052,7 +1026,6 @@ def pulls_bp(Session, s3):
             sess.add(pr)
             sess.commit()
 
-            # Transient diff preview: compare modified file vs specified version or dataset latest (CSV only)
             diff = {}
             try:
                 pr_bytes = _s3_get_bytes(s3, data["modifiedFileUrl"])
@@ -1099,7 +1072,6 @@ def pulls_bp(Session, s3):
             if not ds:
                 return jsonify({"error": "dataset not found"}), 404
 
-            # ensure only one latest
             sess.query(DatasetVersion).filter_by(datasetId=ds.id, isLatest=True).update({"isLatest": False})
 
             new_ver = DatasetVersion(
@@ -1114,7 +1086,6 @@ def pulls_bp(Session, s3):
             )
             sess.add(new_ver)
 
-            # If merged file is CSV → profile and update dataset-level model card
             profile = {}
             try:
                 if pr.modifiedFileName.lower().endswith(".csv"):
@@ -1132,7 +1103,6 @@ def pulls_bp(Session, s3):
             pr.mergedVersionId = new_ver.id
             sess.commit()
 
-            # optional embedding upsert after merge if profiled
             if profile:
                 vec = _compute_embedding_from_profile(profile)
                 current_app.embed_coll.update_one(
@@ -1214,10 +1184,7 @@ def notebooks_bp(Session):
 
     @bp.route("", methods=["POST"])
     def create_notebook():
-        """
-        Body: { title, authorId, description?, fileUrl?, isPublic?, datasetId? }
-        authorId is an opaque string from the frontend.
-        """
+      
         data = request.get_json(force=True)
         if not data.get("title") or not data.get("authorId"):
             return jsonify({"error": "title and authorId required"}), 400
