@@ -1,4 +1,3 @@
-
 import os
 import io
 import json
@@ -10,9 +9,10 @@ import logging
 import datetime as dt
 from enum import Enum
 from typing import Optional, Dict, Any, List
+from flask_cors import CORS
 
 from dotenv import load_dotenv
-from flask import Flask, Blueprint, request, jsonify, current_app, g
+from flask import Flask, Blueprint, request, jsonify, current_app, g, make_response
 from werkzeug.utils import secure_filename
 
 import boto3
@@ -54,6 +54,12 @@ S3_BUCKET = get_env("S3_BUCKET", required=True)
 MONGO_URI = get_env("MONGO_URI", required=True)
 EMBED_DIM = int(get_env("EMBED_DIM", "768"))
 OPENAI_API_KEY = get_env("OPENAI_API_KEY", required=False)
+
+# Optional: override the iframe URL via environment
+IFRAME_NOTEBOOK_URL = get_env(
+    "IFRAME_NOTEBOOK_URL",
+    "http://karans-macbook-air.local:8888/notebooks/Untitled.ipynb"
+)
 
 def _uuid() -> str:
     return str(uuid.uuid4())
@@ -480,6 +486,39 @@ def create_app() -> Flask:
     @app.route("/health")
     def health():
         return {"ok": True, "time": dt.datetime.utcnow().isoformat()}
+
+    # --- SIMPLE IFRAME NOTEBOOK VIEW ---
+    @app.route("/notebook", methods=["GET"])
+    def notebook_iframe():
+        """
+        Render a simple HTML page that embeds the Jupyter notebook URL in an iframe.
+        - Default URL comes from IFRAME_NOTEBOOK_URL env (or the hardcoded local URL)
+        - You can override via query param: /notebook?url=http://host:8888/notebooks/file.ipynb
+        """
+        target_url = request.args.get("url") or IFRAME_NOTEBOOK_URL
+        html = f"""<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Notebook</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      html, body, iframe {{ height: 100%; width: 100%; margin: 0; padding: 0; border: 0; }}
+      body {{ background: #0b0b0c; }}
+    </style>
+  </head>
+  <body>
+    <iframe
+      src="{target_url}"
+      allow="clipboard-read; clipboard-write"
+      referrerpolicy="no-referrer"
+      loading="eager"
+    ></iframe>
+  </body>
+</html>"""
+        resp = make_response(html)
+        resp.headers["Content-Type"] = "text/html; charset=utf-8"
+        return resp
 
     app.logger.info("Flux server initialized successfully")
     return app
@@ -1451,5 +1490,6 @@ def reco_bp(Session, coll: Collection):
 
 if __name__ == "__main__":
     app = create_app()
+    CORS(app)
     port = int(get_env("PORT", "8080"))
     app.run(host="0.0.0.0", port=port, debug=True)
