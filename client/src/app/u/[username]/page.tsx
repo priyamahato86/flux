@@ -342,7 +342,7 @@ export default async function UserProfilePage({
           <section>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-2xl font-bold">Notebooks</h2>
-              <Link href="/ds/create">
+              <Link href="http://46.202.162.243:8850/notebooks/Untitled.ipynb" target="_blank" rel="noopener noreferrer">
                 <Button variant="outline" size="sm">
                   <PlusCircle size={16} className="mr-2" />
                   Add Notebook
