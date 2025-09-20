@@ -54,7 +54,7 @@ export default function LoginPage() {
         </CardHeader>
         <CardContent className="grid gap-6">
           <div className="grid gap-2">
-            <Label htmlFor="username">Username</Label>
+            <Label htmlFor="username">Name</Label>
             <Input
               id="username"
               type="text"
@@ -70,6 +70,7 @@ export default function LoginPage() {
             <Input
               id="password"
               type="password"
+              placeholder="......"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
