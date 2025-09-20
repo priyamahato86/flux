@@ -1,4 +1,3 @@
-// app/(auth)/signup/page.tsx
 "use client";
 
 import { useState } from "react";
@@ -34,7 +33,6 @@ export default function SignupPage() {
   };
 
   const handleSignUp = async () => {
-    // Validate form fields
     if (
       !formData.username ||
       !formData.email ||
@@ -60,9 +58,8 @@ export default function SignupPage() {
         throw new Error(data.error || "Failed to create account");
       }
 
-      // Store user data in cookie (30 days expiry)
       setCookie("ouser", JSON.stringify(data.user), {
-        maxAge: 60 * 60 * 24 * 30, // 30 days
+        maxAge: 60 * 60 * 24 * 30, 
         path: "/",
       });
 

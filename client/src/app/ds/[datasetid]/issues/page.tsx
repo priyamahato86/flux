@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tag, Milestone, ChevronDown, Dot } from "lucide-react";
 
-// --- Types and Data (can be moved to a shared file) ---
 type Label = { name: string; color: string; };
 type Issue = { id: number; title: string; author: string; time: string; label: Label; description: string; };
 const LABELS: Label[] = [
@@ -67,7 +66,6 @@ export default function IssuesListPage() {
                                 <Dot className="text-green-500 h-6 w-6" />
                                 <div className="flex-1">
                                     <div className="flex items-center gap-2">
-                                        {/* Updated Link to point to the detail page */}
                                         <Link href={`/ds/${datasetid}/issues/${issue.id}`} className="font-semibold hover:text-blue-600">{issue.title}</Link>
                                         <Badge style={{ backgroundColor: issue.label.color, color: 'white' }} className="border-transparent">{issue.label.name}</Badge>
                                     </div>

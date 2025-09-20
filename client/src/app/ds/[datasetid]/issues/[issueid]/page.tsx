@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dot } from "lucide-react";
 
-// You would typically have shared types
 type Label = { name: string; color: string; };
 type Issue = { id: number; title: string; author: string; time: string; label: Label; description: string; };
 
@@ -65,7 +64,6 @@ export default function IssueDetailPage() {
                 </Card>
             </div>
             <div className="lg:col-span-1">
-                {/* Sidebar for labels, assignees etc. */}
                 <Card>
                     <CardHeader><h3 className="font-semibold">Labels</h3></CardHeader>
                     <CardContent>

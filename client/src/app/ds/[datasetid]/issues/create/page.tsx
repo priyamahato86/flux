@@ -35,7 +35,7 @@ export default function CreateIssuePage() {
         const newIssue: Issue = {
             id: (storedIssues[0]?.id || 0) + 1,
             title,
-            author: "thtskaran", // Replace with actual user
+            author: "thtskaran", 
             time: "just now",
             label: randomLabel,
         };

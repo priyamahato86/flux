@@ -7,7 +7,6 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { username, password } = body;
 
-    // Validate required fields
     if (!username || !password) {
       return NextResponse.json(
         { error: "Username and password are required" },
@@ -15,14 +14,12 @@ export async function POST(request: Request) {
       );
     }
 
-    // Find user by username
     const user = await prisma.user.findUnique({
       where: {
         username,
       },
     });
 
-    // Check if user exists
     if (!user) {
       return NextResponse.json(
         { error: "Invalid username or password" },
@@ -30,7 +27,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Verify password
     const passwordMatch = await compare(password, user.password);
     if (!passwordMatch) {
       return NextResponse.json(
@@ -39,7 +35,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Remove password from response
     const { password: _, ...userWithoutPassword } = user;
 
     return NextResponse.json({

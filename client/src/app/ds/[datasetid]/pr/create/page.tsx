@@ -9,7 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Upload } from "lucide-react";
 
-// --- Type Definitions ---
 type PullRequest = { id: number; title: string; author: string; time: string; description: string; };
 
 export default function CreatePRPage() {
@@ -72,7 +71,6 @@ export default function CreatePRPage() {
             <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                     <CardTitle className="text-lg">Upload updated files</CardTitle>
-                    {/* Hidden file input that we'll trigger with the button */}
                     <input 
                         type="file" 
                         id="file-upload" 

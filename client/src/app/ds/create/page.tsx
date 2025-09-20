@@ -1,4 +1,3 @@
-// app/ds/[datasetid]/page.tsx
 "use client";
 
 import { useState, DragEvent, ChangeEvent } from "react";
@@ -19,10 +18,8 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { UploadCloud, FileText, X } from "lucide-react";
 
-// Helper function to count words
 const countWords = (str: string) => {
   if (!str) return 0;
   return str.trim().split(/\s+/).filter(Boolean).length;
@@ -41,7 +38,6 @@ export default function DatasetPage({
   const authorNoteWordCount = countWords(authorNote);
   const descriptionWordCount = countWords(description);
 
-  // --- Drag and Drop Handlers ---
   const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
@@ -56,7 +52,7 @@ export default function DatasetPage({
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    e.stopPropagation(); // Necessary to allow drop
+    e.stopPropagation(); 
   };
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -67,7 +63,7 @@ export default function DatasetPage({
     setFiles((prevFiles) => [...prevFiles, ...droppedFiles]);
   };
 
-  // --- File Input Click Handler ---
+
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const selectedFiles = Array.from(e.target.files);
@@ -89,9 +85,7 @@ export default function DatasetPage({
       </header>
       
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* --- Main Content Column --- */}
         <div className="lg:col-span-2 space-y-8">
-          {/* File Upload Section */}
           <Card>
             <CardHeader>
               <CardTitle>Upload Files</CardTitle>
@@ -151,7 +145,6 @@ export default function DatasetPage({
             </CardContent>
           </Card>
 
-          {/* Text Fields */}
           <div className="space-y-6">
              <Card>
               <CardHeader>
@@ -192,7 +185,6 @@ export default function DatasetPage({
 
         </div>
 
-        {/* --- Sidebar Column --- */}
         <div className="lg:col-span-1 space-y-8">
           <Card>
             <CardHeader>

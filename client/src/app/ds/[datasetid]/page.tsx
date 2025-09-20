@@ -30,10 +30,8 @@ import {
 } from "@/components/ui/tooltip";
 import { Info, File, Folder } from "lucide-react";
 
-// --- Data Fetching and Type Definitions ---
-// In a real application, this function would fetch data from your database or API.
+
 const getDatasetDetails = async (datasetId: string) => {
-  // This is dummy data for demonstration purposes.
   return {
     id: datasetId,
     longTitle: "BI Intro to Data Cleaning, EDA and Machine Learning",
@@ -58,22 +56,19 @@ const getDatasetDetails = async (datasetId: string) => {
   };
 };
 
-// Define a type for a single row of preview data for TypeScript safety.
+
 type PreviewRow = Awaited<ReturnType<typeof getDatasetDetails>>['previewData'][number];
 
-// --- Main Page Component ---
-// This is an async Server Component, which is ideal for fetching data.
+
 export default async function DatasetDetailsPage({ params }: { params: { datasetid: string } }) {
     const dataset = await getDatasetDetails(params.datasetid);
-    
-    // Get column headers dynamically from the first row of preview data.
+   
     const previewColumns = dataset.previewData.length > 0 
         ? Object.keys(dataset.previewData[0]) as Array<keyof PreviewRow> 
         : [];
   
     return (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-            {/* Left Main Area: Contains the primary dataset information */}
             <div className="lg:col-span-3 space-y-8">
                 <h2 className="text-2xl font-bold">{dataset.longTitle}</h2>
                 
@@ -126,7 +121,6 @@ export default async function DatasetDetailsPage({ params }: { params: { dataset
                 </Card>
             </div>
 
-            {/* Right Sidebar: Contains metadata and quick-glance info */}
             <div className="lg:col-span-1 space-y-6">
                 <Card>
                     <CardHeader>

@@ -44,9 +44,9 @@ export default function LoginPage() {
         throw new Error(data.error || "Authentication failed");
       }
 
-      // Store user data in cookie (30 days expiry)
+      
       setCookie("ouser", JSON.stringify(data.user), {
-        maxAge: 60 * 60 * 24 * 30, // 30 days
+        maxAge: 60 * 60 * 24 * 30, 
         path: "/",
       });
 
